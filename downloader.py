@@ -2,6 +2,7 @@ import sys
 import time
 import os
 import yt_dlp
+from yt_dlp import YoutubeDL
 import time
 import random
 import subprocess
@@ -12,33 +13,48 @@ duration = sys.argv[3]
 metadata = sys.argv[4] == "True"
 
 base_options = {
-    'format': '\"bestvideo[height<=720]+bestaudio/best[height<=720]\"',
-    'no-overwrites': True,
-    'quiet': True,
-    'no-warnings': True,
-    'output': '\"~/AudioSet/%(id)s.%(ext)s\"',
-    'merge-output-format': 'mkv',
-    'external-downloader': 'ffmpeg',
-    'write-info-json': metadata,
-    'continue': True,
-    'throttled-rate': '100K',
-    'retries': 5,
-    'socket-timeout': 60,
-    'no-progress': True,
-    'no-cache-dir': True,
-    'extractor-args': "\"youtube:skip=hls,dash\""
+    "cachedir": False,
+    "external_downloader": {"default": "ffmpeg"},
+    "external_downloader_args": {
+        "ffmpeg_i": [
+            "-nostats",
+            "-loglevel",
+            "panic",
+            "-hide_banner",
+            "-ss",
+            start,
+            "-t",
+            duration,
+        ]
+    },
+    "extract_flat": "discard_in_playlist",
+    "extractor_args": {"youtube": {"skip": ["hls", "dash"]}},
+    "format": "bestvideo[height<=720]+bestaudio/best[height<=720]",
+    "fragment_retries": 10,
+    "ignoreerrors": "only_download",
+    "merge_output_format": "mkv",
+    "no_warnings": True,
+    "noprogress": True,
+    "outtmpl": {"default": "~/AudioSet/%(id)s.%(ext)s"},
+    "overwrites": False,
+    "postprocessors": [
+        {"key": "FFmpegConcat", "only_multi_video": True, "when": "playlist"}
+    ],
+    "quiet": True,
+    "retries": 5,
+    "socket_timeout": 60.0,
+    "throttledratelimit": 102400,
+    "writeinfojson": True,
 }
-options = dict(base_options)    
-options['external-downloader-args'] = "\"ffmpeg_i: -nostats -loglevel panic -hide_banner -ss %s -t %s\"" % (start, duration)
 
-args = ""
-for key in options.keys():
-    if options[key] == True:
-        args += "--%s " % (key)
-    elif options[key] == False:
-        continue
-    else:
-        args += "--%s %s " % (key, options[key])
 
-err = subprocess.run("yt-dlp http://www.youtube.com/watch?v=%s %s" % (ytid, args), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, shell=True).stderr
-print(err.decode())
+with YoutubeDL(base_options) as ydl:
+    info = ydl.extract_info(ytid, download=True)
+
+# err = subprocess.run(
+#     "~/.local/bin/yt-dlp http://www.youtube.com/watch?v=%s %s" % (ytid, args),
+#     stdout=subprocess.DEVNULL,
+#     stderr=subprocess.PIPE,
+#     shell=True,
+# ).stderr
+# print(err.decode())
