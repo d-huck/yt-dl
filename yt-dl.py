@@ -1,34 +1,45 @@
+import argparse
 import csv
 import json
+import logging
+import multiprocessing as mp
+import os
+import random
+import shutil
+import socket
+import subprocess
 import sys
 import time
-import os
-import yt_dlp
-import time
-import random
 from multiprocessing import Process
-import multiprocessing as mp
-import socket
-import shutil
-import subprocess
-import argparse
+
+import yt_dlp
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
+ch = logging.StreamHandler()
+ch.setFormatter(formatter)
+ch.setLevel(logging.DEBUG)
 
 
-def isOpen(ip,port):
-   s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-   s.settimeout(2)
-   try:
-      s.connect((ip, int(port)))
-      s.shutdown(2)
-      return True
-   except:
-      return False
+def isOpen(ip, port):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(2)
+    try:
+        s.connect((ip, int(port)))
+        s.shutdown(2)
+        return True
+    except:
+        return False
+
 
 def selectHost(hosts, args):
     while True:
         ind = random.randint(0, len(hosts) - 1)
-        if isOpen("%s.%s" %(hosts[ind], args.domain), "22"):
+        if isOpen("%s.%s" % (hosts[ind], args.domain), "22"):
             return hosts[ind]
+
 
 def labels(label_q, args):
     start_time = time.time()
@@ -37,16 +48,16 @@ def labels(label_q, args):
     data = []
     while True:
         (metadata, ytid, label_ids) = label_q.get()
-        if metadata == '?':
+        if metadata == "?":
             break
 
         labels = []
         video_data = {}
         if len(label_ids):
-            for id in label_ids:
+            for _id in label_ids:
                 try:
-                    id = id.replace("\"", '').lstrip().rstrip()
-                    labels.append(ontology[id])
+                    _id = id.replace('"', "").lstrip().rstrip()
+                    labels.append(_id)
                 except KeyError:
                     continue
         video_data["labels"] = labels
@@ -59,13 +70,14 @@ def labels(label_q, args):
             end_time = time.time()
             batch_diff = end_time - batch_time
             total_diff = end_time - start_time
-            with open('%s/out.log' % (args.exp_dir), 'a+') as f:
-                f.write("%d, batch_time = %f, total_time = %f\n" % (counter, batch_diff, total_diff))
+            logger.info(
+                f"{counter}, batchtime={batch_diff:.2f}, total_time = {total_diff:.2f}"
+            )
             batch_time = time.time()
         counter += 1
 
-    with open('%s/out.json' % (out), 'a') as f:
-        json.dump(data, f, indent=4)
+    logger.info(json.dump(data, f, indent=4))
+
 
 def postprocess(postprocess_q, label_q, args):
     metadata = True
@@ -78,9 +90,13 @@ def postprocess(postprocess_q, label_q, args):
 
             in_path = "%s/%s.*" % (args.tmp, ytid)
             out_path = "%s/%s.mkv" % (args.out, ytid)
-            os.system("ffmpeg -nostats -loglevel 0 -hide_banner -sseof -%s -i %s %s" % (duration, in_path, out_path))
+            os.system(
+                "ffmpeg -nostats -loglevel 0 -hide_banner -sseof -%s -i %s %s"
+                % (duration, in_path, out_path)
+            )
             os.system("rm %s" % (in_path))
-            label_q.put((metadata, ytid, label_ids))    
+            label_q.put((metadata, ytid, label_ids))
+
 
 def child(q, postprocess_q, child_id, args):
     while True:
@@ -88,48 +104,70 @@ def child(q, postprocess_q, child_id, args):
         if ytid == "?":
             break
 
-        start = time.strftime('%H:%M:%S.00', time.gmtime(start))
+        start = time.strftime("%H:%M:%S.00", time.gmtime(start))
         duration = str(int(duration))
-        
+
         try:
-            output = subprocess.check_output("ssh -q -o StrictHostKeyChecking=no %s@%s.%s \"python3 ~/AudioSet/downloader.py %s %s %s True\"" % (args.user, host, args.domain, ytid, start, duration), shell=True).decode()
-            
+            output = subprocess.check_output(
+                'ssh -q -o StrictHostKeyChecking=no %s@%s.%s "python3 ~/AudioSet/downloader.py %s %s %s True"'
+                % (args.user, host, args.domain, ytid, start, duration),
+                shell=True,
+            ).decode()
+
         except Exception as e:
-            with open('%s/err.log' % (args.exp_dir), 'a') as f:
-                f.write("Error downloading %s on host %s\n" % (ytid, host))
+            logger.error(f"Error downloading {ytid} on {host} -- {str(e)}")
             continue
 
         if len(output) <= 1:
-            os.system("scp -q %s@%s.%s:~/AudioSet/%s.* %s"% (args.user, host, args.domain, ytid, args.tmp))
-            os.system("ssh -q -o StrictHostKeyChecking=no %s@%s.%s \"rm ~/AudioSet/%s.*\"" % (args.user, host, args.domain, ytid))
+            os.system(
+                "scp -q %s@%s.%s:~/AudioSet/%s.* %s"
+                % (args.user, host, args.domain, ytid, args.tmp)
+            )
+            os.system(
+                'ssh -q -o StrictHostKeyChecking=no %s@%s.%s "rm ~/AudioSet/%s.*"'
+                % (args.user, host, args.domain, ytid)
+            )
             postprocess_q.put((duration, host, ytid, label_ids))
 
         else:
-            with open('%s/err.log' % (args.exp_dir), 'a') as f:
-                f.write(output.strip() + "\n")
-	
-if __name__ == '__main__':
+            logger.error(f"{output.strip()}")
+
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--data', type=str, default = '', help='AudioSet data json')
-    parser.add_argument('--ontology', type=str, default = '', help='ontology json')
+    parser.add_argument("--data", type=str, default="", help="AudioSet data json")
 
-    parser.add_argument('--num-workers', type=int, default=5, help='number of downloading processes')
-    parser.add_argument('--num-postprocessors', type=int, default=4, help='number of postprocessor processes')
+    parser.add_argument(
+        "--num-workers", type=int, default=5, help="number of downloading processes"
+    )
+    parser.add_argument(
+        "--num-postprocessors",
+        type=int,
+        default=4,
+        help="number of postprocessor processes",
+    )
 
-    parser.add_argument('--user', type=str, default='', help='username on remote servers')
-    parser.add_argument('--domain', type=str, default='', help='domain of remote servers')
-    parser.add_argument('--hostnames', type=str, default='', help='hostnames of remote servers')
-    
-    parser.add_argument('--tmp', type=str, default='', help='temporary storage')
-    parser.add_argument('--out', type=str, default='', help='storage location')
+    parser.add_argument(
+        "--user", type=str, default="", help="username on remote servers"
+    )
+    parser.add_argument(
+        "--domain", type=str, default="", help="domain of remote servers"
+    )
+    parser.add_argument(
+        "--hostnames", type=str, default="", help="hostnames of remote servers"
+    )
 
-    parser.add_argument('--exp-dir', type=str, default='', help='directory for output files')
+    parser.add_argument("--tmp", type=str, default="", help="temporary storage")
+    parser.add_argument("--out", type=str, default="", help="storage location")
+
+    parser.add_argument(
+        "--exp-dir", type=str, default="", help="directory for output files"
+    )
 
     args = parser.parse_args()
 
     video_csv = args.data
-    ontology_json = args.ontology
     num_proxies = args.num_workers
     exp_dir = args.exp_dir
     domain = args.domain
@@ -137,21 +175,22 @@ if __name__ == '__main__':
     out = args.out
     user = args.user
 
+    # set up log files
+    errh = logging.FileHandler(f"{exp_dir}/err.log")
+    infoh = logging.FileHandler(f"{out.log}")
 
-    with open('%s/err.log' % (exp_dir), 'w+') as f:
-        f.truncate(0)
-    with open('%s/out.log' % (exp_dir), 'w+') as f:
-        f.truncate(0)
-        
-    tmp = json.load(open(ontology_json, 'r'))
-    ontology = {}
-    for i in range(len(tmp)):
-        ontology[tmp[i]['id']] = tmp[i]['name']
+    errh.setLevel(logging.WARNING)
+    infoh.setLevel(logging.INFO)
+
+    errh.setFormatter(formatter)
+    infoh.setFormatter(formatter)
+    logger.addHandler(errh)
+    logger.addHandler(infoh)
 
     q = mp.Queue()
     postprocess_q = mp.Queue()
     label_q = mp.Queue()
-    num_postprocessors = args.num_postprocessors #try for ~.8 of num_proxies
+    num_postprocessors = args.num_postprocessors  # try for ~.8 of num_proxies
     workers = []
     hosts = []
 
@@ -160,27 +199,34 @@ if __name__ == '__main__':
             if isOpen("%s.%s" % (line.strip(), domain), "22"):
                 hosts.append(line.strip())
 
-    os.system("ssh -q -o StrictHostKeyChecking=no %s@%s.%s \"mkdir ~/AudioSet/\"" % (user, selectHost(hosts, args), domain))
-    os.system("scp downloader.py %s@%s.%s:~/AudioSet/downloader.py" % (user, selectHost(hosts, args), domain))
+    os.system(
+        'ssh -q -o StrictHostKeyChecking=no %s@%s.%s "mkdir ~/AudioSet/"'
+        % (user, selectHost(hosts, args), domain)
+    )
+    os.system(
+        "scp downloader.py %s@%s.%s:~/AudioSet/downloader.py"
+        % (user, selectHost(hosts, args), domain)
+    )
 
     for i in range(num_proxies):
         workers.append(Process(target=child, args=(q, postprocess_q, i, args)))
 
     for i in range(num_postprocessors):
-        workers.append(Process(target=postprocess, args=(postprocess_q, label_q, args )))
+        workers.append(Process(target=postprocess, args=(postprocess_q, label_q, args)))
     workers.append(Process(target=labels, args=(label_q, args)))
 
     for i in range(len(workers)):
         workers[i].start()
 
     start_time = time.time()
-    with open(video_csv, newline = '') as csvfile:
+    with open(video_csv, newline="") as csvfile:
         reader = csv.reader(csvfile)
-        
-        for i, row in enumerate(reader):
 
-            #skip header of csv
-            if i < 3:
+        for i, row in enumerate(reader):
+            # skip header if it exists
+            try:
+                _ = int(row[1])
+            except ValueError:
                 continue
 
             ytid = row[0]
@@ -194,7 +240,7 @@ if __name__ == '__main__':
                 q.put((ytid, start, duration, label_ids, host))
 
     for i in range(num_proxies):
-        q.put(("?", None, None, None, None))    
+        q.put(("?", None, None, None, None))
     for i in range(num_proxies):
         workers[i].join()
 
@@ -205,4 +251,3 @@ if __name__ == '__main__':
     label_q.put(("?", None, None))
     workers[len(workers) - 1].join()
     end_time = time.time()
-
