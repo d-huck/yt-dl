@@ -14,13 +14,26 @@ from multiprocessing import Process
 
 import yt_dlp
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("yt_dl")
 logger.setLevel(logging.DEBUG)
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+formatter = logging.Formatter("%(asctime)s ::%(levelname)s:: %(message)s")
 
 ch = logging.StreamHandler()
 ch.setFormatter(formatter)
-ch.setLevel(logging.DEBUG)
+ch.setLevel(logging.INFO)
+
+error_handler = logging.FileHandler(
+    f"./err.log",
+    mode="w",
+)
+info_handler = logging.FileHandler(f"./out.log", mode="w")
+error_handler.setLevel(logging.ERROR)
+info_handler.setLevel(logging.INFO)
+error_handler.setFormatter(formatter)
+info_handler.setFormatter(formatter)
+logger.addHandler(error_handler)
+logger.addHandler(info_handler)
+logger.addHandler(ch)
 
 
 def isOpen(ip, port):
@@ -56,7 +69,7 @@ def labels(label_q, args):
         if len(label_ids):
             for _id in label_ids:
                 try:
-                    _id = id.replace('"', "").lstrip().rstrip()
+                    _id = _id.replace('"', "").lstrip().rstrip()
                     labels.append(_id)
                 except KeyError:
                     continue
@@ -76,7 +89,8 @@ def labels(label_q, args):
             batch_time = time.time()
         counter += 1
 
-    logger.info(json.dump(data, f, indent=4))
+        with open("%s/out.json" % (args.out), "a") as f:
+            json.dump(data, f, indent=4)
 
 
 def postprocess(postprocess_q, label_q, args):
@@ -108,6 +122,7 @@ def child(q, postprocess_q, child_id, args):
         duration = str(int(duration))
 
         try:
+            logger.info(f"Downloading {ytid} on {host}")
             output = subprocess.check_output(
                 'ssh -q -o StrictHostKeyChecking=no %s@%s.%s "python3 ~/AudioSet/downloader.py %s %s %s True"'
                 % (args.user, host, args.domain, ytid, start, duration),
@@ -174,18 +189,6 @@ if __name__ == "__main__":
     tmp = args.tmp
     out = args.out
     user = args.user
-
-    # set up log files
-    errh = logging.FileHandler(f"{exp_dir}/err.log")
-    infoh = logging.FileHandler(f"{out.log}")
-
-    errh.setLevel(logging.WARNING)
-    infoh.setLevel(logging.INFO)
-
-    errh.setFormatter(formatter)
-    infoh.setFormatter(formatter)
-    logger.addHandler(errh)
-    logger.addHandler(infoh)
 
     q = mp.Queue()
     postprocess_q = mp.Queue()
