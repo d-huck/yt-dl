@@ -49,7 +49,10 @@ base_options = {
 
 
 with YoutubeDL(base_options) as ydl:
-    info = ydl.extract_info(ytid, download=True)
+    try:
+        info = ydl.extract_info(ytid, download=True)
+    except Exception as e:
+        print(e)
 
 # err = subprocess.run(
 #     "~/.local/bin/yt-dlp http://www.youtube.com/watch?v=%s %s" % (ytid, args),
