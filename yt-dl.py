@@ -14,26 +14,7 @@ from multiprocessing import Process
 
 import yt_dlp
 
-logger = logging.getLogger("yt_dl")
-logger.setLevel(logging.DEBUG)
-formatter = logging.Formatter("%(asctime)s ::%(levelname)s:: %(message)s")
-
-ch = logging.StreamHandler()
-ch.setFormatter(formatter)
-ch.setLevel(logging.INFO)
-
-error_handler = logging.FileHandler(
-    f"./err.log",
-    mode="w",
-)
-info_handler = logging.FileHandler(f"./out.log", mode="w")
-error_handler.setLevel(logging.ERROR)
-info_handler.setLevel(logging.INFO)
-error_handler.setFormatter(formatter)
-info_handler.setFormatter(formatter)
-logger.addHandler(error_handler)
-logger.addHandler(info_handler)
-logger.addHandler(ch)
+logger = logging.getLogger(__name__)
 
 
 def isOpen(ip, port):
@@ -105,7 +86,7 @@ def postprocess(postprocess_q, label_q, args):
             in_path = "%s/%s.*" % (args.tmp, ytid)
             out_path = "%s/%s.mkv" % (args.out, ytid)
             os.system(
-                "ffmpeg -nostats -loglevel 0 -hide_banner -sseof -%s -i %s %s"
+                "ffmpeg -nostats -loglevel 0 -hide_banner -threads 2 -sseof -%s -i %s %s"
                 % (duration, in_path, out_path)
             )
             os.system("rm %s" % (in_path))
@@ -134,9 +115,10 @@ def child(q, postprocess_q, child_id, args):
             continue
 
         if len(output) <= 1:
+            out_dir = args.tmp if args.postprocess else args.out
             os.system(
                 "scp -q %s@%s.%s:~/AudioSet/%s.* %s"
-                % (args.user, host, args.domain, ytid, args.tmp)
+                % (args.user, host, args.domain, ytid, out_dir)
             )
             os.system(
                 'ssh -q -o StrictHostKeyChecking=no %s@%s.%s "rm ~/AudioSet/%s.*"'
@@ -173,11 +155,17 @@ if __name__ == "__main__":
         "--hostnames", type=str, default="", help="hostnames of remote servers"
     )
 
-    parser.add_argument("--tmp", type=str, default="", help="temporary storage")
-    parser.add_argument("--out", type=str, default="", help="storage location")
+    parser.add_argument("--tmp", type=str, default="./tmp", help="temporary storage")
+    parser.add_argument("--out", type=str, default="./data", help="storage location")
 
     parser.add_argument(
-        "--exp-dir", type=str, default="", help="directory for output files"
+        "--exp-dir", type=str, default="./logs", help="directory for output files"
+    )
+    parser.add_argument(
+        "--postprocess",
+        type=bool,
+        default=False,
+        help="post process by enforcing duration",
     )
 
     args = parser.parse_args()
@@ -189,6 +177,35 @@ if __name__ == "__main__":
     tmp = args.tmp
     out = args.out
     user = args.user
+
+    if not os.path.exists(tmp):
+        os.makedirs(tmp)
+    if not os.path.exists(out):
+        os.makedirs(out)
+    if not os.path.exists(exp_dir):
+        os.makedirs(exp_dir)
+
+    # set up logging
+    logger = logging.getLogger("yt_dl")
+    logger.setLevel(logging.DEBUG)
+    formatter = logging.Formatter("%(asctime)s ::%(levelname)s:: %(message)s")
+
+    ch = logging.StreamHandler()
+    ch.setFormatter(formatter)
+    ch.setLevel(logging.INFO)
+
+    error_handler = logging.FileHandler(
+        f"{args.exp_dir}/err.log",
+        mode="w",
+    )
+    info_handler = logging.FileHandler(f"{args.exp_dir}/out.log", mode="w")
+    error_handler.setLevel(logging.ERROR)
+    info_handler.setLevel(logging.INFO)
+    error_handler.setFormatter(formatter)
+    info_handler.setFormatter(formatter)
+    logger.addHandler(error_handler)
+    logger.addHandler(info_handler)
+    logger.addHandler(ch)
 
     q = mp.Queue()
     postprocess_q = mp.Queue()
@@ -214,14 +231,23 @@ if __name__ == "__main__":
     for i in range(num_proxies):
         workers.append(Process(target=child, args=(q, postprocess_q, i, args)))
 
-    for i in range(num_postprocessors):
-        workers.append(Process(target=postprocess, args=(postprocess_q, label_q, args)))
-    workers.append(Process(target=labels, args=(label_q, args)))
+    if args.postprocess:
+        for i in range(num_postprocessors):
+            workers.append(
+                Process(target=postprocess, args=(postprocess_q, label_q, args))
+            )
+        workers.append(Process(target=labels, args=(label_q, args)))
 
     for i in range(len(workers)):
         workers[i].start()
 
     start_time = time.time()
+    completed = []
+    for root, dirs, files in os.walk(out):
+        for file in files:
+            if file.endswith(".mkv"):
+                completed.append(file.split(".")[0])
+
     with open(video_csv, newline="") as csvfile:
         reader = csv.reader(csvfile)
 
@@ -233,6 +259,9 @@ if __name__ == "__main__":
                 continue
 
             ytid = row[0]
+            if ytid in completed:  # skip if already downloaded
+                continue
+
             start = float(row[1])
             end = float(row[2])
             duration = end - start
