@@ -70,8 +70,8 @@ def labels(label_q, args):
             batch_time = time.time()
         counter += 1
 
-        with open("%s/out.json" % (args.out), "a") as f:
-            json.dump(data, f, indent=4)
+    with open("%s/out.json" % (args.out), "a") as f:
+        json.dump(data, f, indent=4)
 
 
 def postprocess(postprocess_q, label_q, args):
