@@ -23,10 +23,11 @@ python3 yt-dl.py [OPTIONS]
     --data                           AudioSet data csv location
     <!-- --ontology                       AudioSet ontology json location -->
     --num-workers                    Number of downloading processes
+    --postprocess                    Turn postprocessing on/off. Default off
     --num-postprocessers             Number of postprocessor processes
     --user                           Username on remote servers
     --domain                         Domain of remote servers
     --hostnames                      Hostnames of remote servers
-    --tmp                            Temporary storage location
-    --out                            Output directory
-    --exp_dir                        Logfile directory
+    --tmp                            Temporary storage location [Default: ./tmp]
+    --out                            Output directory [Default: ./data]
+    --exp_dir                        Logfile directory [Default: ./logs]
