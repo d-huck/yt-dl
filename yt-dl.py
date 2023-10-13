@@ -236,7 +236,7 @@ if __name__ == "__main__":
             workers.append(
                 Process(target=postprocess, args=(postprocess_q, label_q, args))
             )
-        workers.append(Process(target=labels, args=(label_q, args)))
+    workers.append(Process(target=labels, args=(label_q, args)))
 
     for i in range(len(workers)):
         workers[i].start()
@@ -275,11 +275,12 @@ if __name__ == "__main__":
         q.put(("?", None, None, None, None))
     for i in range(num_proxies):
         workers[i].join()
-
-    for i in range(num_postprocessors):
-        postprocess_q.put(("?", None, None, None))
-    for i in range(num_postprocessors):
-        workers[num_proxies + i].join()
+    if args.postprocess:
+        for i in range(num_postprocessors):
+            postprocess_q.put(("?", None, None, None))
+        for i in range(num_postprocessors):
+            workers[num_proxies + i].join()
     label_q.put(("?", None, None))
-    workers[len(workers) - 1].join()
+    for worker in workers:
+        worker.join()
     end_time = time.time()
