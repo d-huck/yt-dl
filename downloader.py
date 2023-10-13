@@ -49,15 +49,6 @@ base_options = {
 
 
 with YoutubeDL(base_options) as ydl:
-    try:
-        info = ydl.extract_info(ytid, download=True)
-    except Exception as e:
-        print(e)
-
-# err = subprocess.run(
-#     "~/.local/bin/yt-dlp http://www.youtube.com/watch?v=%s %s" % (ytid, args),
-#     stdout=subprocess.DEVNULL,
-#     stderr=subprocess.PIPE,
-#     shell=True,
-# ).stderr
-# print(err.decode())
+    error = ydl.download(ytid)
+    if error:
+        print(f"Unable to download {ytid} on {os.uname()[1]} -- error code: {error}")
