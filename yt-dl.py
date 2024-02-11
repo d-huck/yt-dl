@@ -5,14 +5,13 @@ import logging
 import multiprocessing as mp
 import os
 import random
-import shutil
 import socket
 import subprocess
-import sys
 import time
 from multiprocessing import Process
 
-import yt_dlp
+from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -89,21 +88,30 @@ def postprocess(postprocess_q, label_q, args):
                 "ffmpeg -nostats -loglevel 0 -hide_banner -threads 2 -sseof -%s -i %s %s"
                 % (duration, in_path, out_path)
             )
-            os.system("rm %s" % (in_path))
+            os.system("rm -rf %s" % (in_path))
             label_q.put((metadata, ytid, label_ids))
 
 
-def child(q, postprocess_q, child_id, args):
+def cleanup(usr, host, dom, ytid):
+    os.system(
+        f'ssh -q -o StrictHostKeyChecking=no {usr}@{host}.{dom} rm -rf "~/AudioSet/{ytid}.* {ytid}/"'
+    )
+
+
+def child(q, postprocess_q, child_id, pbar, args):
     while True:
         (ytid, start, duration, label_ids, host) = q.get()
         if ytid == "?":
+            with logging_redirect_tqdm():
+                logger.info(f"Queue empty, child #{child_id} finished!")
             break
 
-        start = time.strftime("%H:%M:%S.00", time.gmtime(start))
+        # start = time.strftime("%H:%M:%S.00", time.gmtime(start))
         duration = str(int(duration))
 
         try:
-            logger.info(f"Downloading {ytid} on {host}")
+            with logging_redirect_tqdm():
+                logger.info(f"Downloading {ytid} on {host}")
             output = subprocess.check_output(
                 'ssh -q -o StrictHostKeyChecking=no %s@%s.%s "python3 ~/AudioSet/downloader.py %s %s %s True"'
                 % (args.user, host, args.domain, ytid, start, duration),
@@ -111,23 +119,27 @@ def child(q, postprocess_q, child_id, args):
             ).decode()
 
         except Exception as e:
-            logger.error(f"Error downloading {ytid} on {host} -- {str(e)}")
+            with logging_redirect_tqdm():
+                logger.error(f"Error downloading {ytid} on {host} -- {str(e)}")
+            pbar.update(1)
             continue
 
         if len(output) <= 1:
             out_dir = args.tmp if args.postprocess else args.out
+            if ytid.startswith("-"):
+                ytid = "\\" + ytid
             os.system(
-                "scp -q %s@%s.%s:~/AudioSet/%s.* %s"
-                % (args.user, host, args.domain, ytid, out_dir)
+                f'scp -q {args.user}@{host}.{args.domain}:"~/AudioSet/{ytid}.tgz" {out_dir}'
             )
-            os.system(
-                'ssh -q -o StrictHostKeyChecking=no %s@%s.%s "rm ~/AudioSet/%s.*"'
-                % (args.user, host, args.domain, ytid)
-            )
-            postprocess_q.put((duration, host, ytid, label_ids))
+            cleanup(args.user, host, args.domain, ytid)
+            if args.postprocess:
+                postprocess_q.put((duration, host, ytid, label_ids))
 
         else:
-            logger.error(f"{output.strip()}")
+            with logging_redirect_tqdm():
+                logger.error(f"{output.strip()}")
+
+        pbar.update(1)
 
 
 if __name__ == "__main__":
@@ -203,9 +215,9 @@ if __name__ == "__main__":
     info_handler.setLevel(logging.INFO)
     error_handler.setFormatter(formatter)
     info_handler.setFormatter(formatter)
-    logger.addHandler(error_handler)
+    # logger.addHandler(error_handler)
     logger.addHandler(info_handler)
-    logger.addHandler(ch)
+    # logger.addHandler(ch)
 
     q = mp.Queue()
     postprocess_q = mp.Queue()
@@ -227,16 +239,23 @@ if __name__ == "__main__":
         "scp downloader.py %s@%s.%s:~/AudioSet/downloader.py"
         % (user, selectHost(hosts, args), domain)
     )
-
+    pbar = tqdm(total=1, smoothing=0.05)
+    with logging_redirect_tqdm():
+        logger.info("Setting up workers...")
     for i in range(num_proxies):
-        workers.append(Process(target=child, args=(q, postprocess_q, i, args)))
+        workers.append(Process(target=child, args=(q, postprocess_q, i, pbar, args)))
 
     if args.postprocess:
+        with logging_redirect_tqdm():
+            logger.info("Setting up postprocessors...")
         for i in range(num_postprocessors):
             workers.append(
                 Process(target=postprocess, args=(postprocess_q, label_q, args))
             )
-    workers.append(Process(target=labels, args=(label_q, args)))
+        workers.append(Process(target=labels, args=(label_q, args)))
+    else:
+        del postprocess_q
+        del label_q
 
     for i in range(len(workers)):
         workers[i].start()
@@ -245,16 +264,18 @@ if __name__ == "__main__":
     completed = []
     for root, dirs, files in os.walk(out):
         for file in files:
-            if file.endswith(".mkv"):
+            if file.endswith(".tgz"):
                 completed.append(file.split(".")[0])
 
+    videos = []
+    with logging_redirect_tqdm():
+        logger.info("Reading video csv...")
     with open(video_csv, newline="") as csvfile:
         reader = csv.reader(csvfile)
-
         for i, row in enumerate(reader):
             # skip header if it exists
             try:
-                _ = int(row[1])
+                start = int(row[1])
             except ValueError:
                 continue
 
@@ -262,25 +283,30 @@ if __name__ == "__main__":
             if ytid in completed:  # skip if already downloaded
                 continue
 
-            start = float(row[1])
-            end = float(row[2])
+            end = int(row[2])
             duration = end - start
             label_ids = row[3:]
             host = selectHost(hosts, args)
 
             if not os.path.exists("%s/%s.mkv" % (tmp, ytid)):
                 q.put((ytid, start, duration, label_ids, host))
+                pbar.total += 1
+                pbar.refresh()
 
     for i in range(num_proxies):
         q.put(("?", None, None, None, None))
-    for i in range(num_proxies):
-        workers[i].join()
-    if args.postprocess:
-        for i in range(num_postprocessors):
-            postprocess_q.put(("?", None, None, None))
-        for i in range(num_postprocessors):
-            workers[num_proxies + i].join()
-    label_q.put(("?", None, None))
-    for worker in workers:
-        worker.join()
+    try:
+        for i in range(num_proxies):
+            workers[i].join()
+        if args.postprocess:
+            for i in range(num_postprocessors):
+                postprocess_q.put(("?", None, None, None))
+            for i in range(num_postprocessors):
+                workers[num_proxies + i].join()
+            label_q.put(("?", None, None))
+        for worker in workers:
+            worker.join()
+    except KeyboardInterrupt:
+        for worker in workers:
+            worker.terminate()
     end_time = time.time()
