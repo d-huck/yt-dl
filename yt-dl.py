@@ -276,7 +276,6 @@ if __name__ == "__main__":
 
     logger.info("Reading video csv...")
     with open(video_csv, newline="") as csvfile:
-        total = 0
         reader = csv.reader(csvfile, delimiter=delim)
         for i, row in enumerate(reader):
             # skip header if it exists
@@ -296,9 +295,6 @@ if __name__ == "__main__":
 
             if not os.path.exists("%s/%s.mkv" % (tmp, ytid)):
                 q.put((ytid, start, duration, label_ids, host))
-                total += 1
-            if total == 50:
-                break
 
     for i in range(num_proxies):
         q.put(("?", None, None, None, None))
