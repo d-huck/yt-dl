@@ -100,7 +100,7 @@ def cleanup(usr, host, dom, ytid):
 
 def child(q, postprocess_q, child_id, done_q, args):
     while True:
-        (ytid, start, duration, label_ids, host) = q.get()
+        (ytid, label_ids, host) = q.get()
         if ytid == "?":
             logger.info(f"Queue empty, child #{child_id} finished!")
             break
@@ -111,8 +111,8 @@ def child(q, postprocess_q, child_id, done_q, args):
         try:
             logger.info(f"[qsize: {q.qsize()}] Downloading {ytid} on {host}")
             output = subprocess.check_output(
-                'ssh -q -o StrictHostKeyChecking=no %s@%s.%s "python3 ~/AudioSet/downloader.py %s %s %s True"'
-                % (args.user, host, args.domain, ytid, start, duration),
+                'ssh -q -o StrictHostKeyChecking=no %s@%s.%s "python3 ~/AudioSet/downloader.py %s True"'
+                % (args.user, host, args.domain, ytid),
                 shell=True,
             ).decode()
 
@@ -278,26 +278,23 @@ if __name__ == "__main__":
     with open(video_csv, newline="") as csvfile:
         reader = csv.reader(csvfile, delimiter=delim)
         for i, row in enumerate(reader):
-            # skip header if it exists
-            try:
-                start = int(row[1])
-            except ValueError:
-                continue
+            # # skip header if it exists
+            # try:
+            #     start = int(row[1])
+            # except ValueError:
+            #     continue
 
             ytid = row[0]
             if ytid in completed:  # skip if already downloaded
                 continue
-
-            end = int(row[2])
-            duration = end - start
-            label_ids = row[3:]
+            label_ids = row[1:]
             host = selectHost(hosts, args)
 
             if not os.path.exists("%s/%s.mkv" % (tmp, ytid)):
-                q.put((ytid, start, duration, label_ids, host))
+                q.put((ytid, label_ids, host))
 
     for i in range(num_proxies):
-        q.put(("?", None, None, None, None))
+        q.put(("?", None, None))
     try:
         for i in range(num_proxies):
             workers[i].join()
