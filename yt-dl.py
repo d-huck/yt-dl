@@ -10,7 +10,6 @@ import subprocess
 import time
 from multiprocessing import Process
 
-from tqdm import tqdm
 
 # from tqdm.contrib.logging import logging_redirect_tqdm
 
