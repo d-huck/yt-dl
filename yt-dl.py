@@ -11,7 +11,8 @@ import time
 from multiprocessing import Process
 
 from tqdm import tqdm
-from tqdm.contrib.logging import logging_redirect_tqdm
+
+# from tqdm.contrib.logging import logging_redirect_tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -102,16 +103,14 @@ def child(q, postprocess_q, child_id, done_q, args):
     while True:
         (ytid, start, duration, label_ids, host) = q.get()
         if ytid == "?":
-            with logging_redirect_tqdm():
-                logger.info(f"Queue empty, child #{child_id} finished!")
+            logger.info(f"Queue empty, child #{child_id} finished!")
             break
 
         # start = time.strftime("%H:%M:%S.00", time.gmtime(start))
         duration = str(int(duration))
 
         try:
-            with logging_redirect_tqdm():
-                logger.info(f"Downloading {ytid} on {host}")
+            logger.info(f"[qsize: {q.qsize()}] Downloading {ytid} on {host}")
             output = subprocess.check_output(
                 'ssh -q -o StrictHostKeyChecking=no %s@%s.%s "python3 ~/AudioSet/downloader.py %s %s %s True"'
                 % (args.user, host, args.domain, ytid, start, duration),
@@ -119,8 +118,7 @@ def child(q, postprocess_q, child_id, done_q, args):
             ).decode()
 
         except Exception as e:
-            with logging_redirect_tqdm():
-                logger.error(f"Error downloading {ytid} on {host} -- {str(e)}")
+            logger.error(f"Error downloading {ytid} on {host} -- {str(e)}")
             done_q.put(1)
             continue
 
@@ -136,8 +134,7 @@ def child(q, postprocess_q, child_id, done_q, args):
                 postprocess_q.put((duration, host, ytid, label_ids))
 
         else:
-            with logging_redirect_tqdm():
-                logger.error(f"{output.strip()}")
+            logger.error(f"Error: {output.strip()}")
         done_q.put(1)
 
 
@@ -224,9 +221,9 @@ if __name__ == "__main__":
     info_handler.setLevel(logging.INFO)
     error_handler.setFormatter(formatter)
     info_handler.setFormatter(formatter)
-    # logger.addHandler(error_handler)
+    logger.addHandler(error_handler)
     logger.addHandler(info_handler)
-    # logger.addHandler(ch)
+    logger.addHandler(ch)
 
     q = mp.Queue()
     postprocess_q = mp.Queue()
@@ -250,14 +247,13 @@ if __name__ == "__main__":
         % (user, selectHost(hosts, args), domain)
     )
 
-    with logging_redirect_tqdm():
-        logger.info("Setting up workers...")
+    logger.info("Setting up workers...")
     for i in range(num_proxies):
         workers.append(Process(target=child, args=(q, postprocess_q, i, done_q, args)))
 
     if args.postprocess:
-        with logging_redirect_tqdm():
-            logger.info("Setting up postprocessors...")
+
+        logger.info("Setting up postprocessors...")
         for i in range(num_postprocessors):
             workers.append(
                 Process(target=postprocess, args=(postprocess_q, label_q, args))
@@ -278,8 +274,8 @@ if __name__ == "__main__":
                 completed.append(file.split(".")[0])
 
     videos = []
-    with logging_redirect_tqdm():
-        logger.info("Reading video csv...")
+
+    logger.info("Reading video csv...")
     with open(video_csv, newline="") as csvfile:
         total = 0
         reader = csv.reader(csvfile, delimiter=delim)
@@ -302,11 +298,8 @@ if __name__ == "__main__":
             if not os.path.exists("%s/%s.mkv" % (tmp, ytid)):
                 q.put((ytid, start, duration, label_ids, host))
                 total += 1
-
-    count = 0
-    pbar = tqdm(total=total, smoothing=0.05)
-    while count < total:
-        count += done_q.get()
+            if total == 50:
+                break
 
     for i in range(num_proxies):
         q.put(("?", None, None, None, None))
