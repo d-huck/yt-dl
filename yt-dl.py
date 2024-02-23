@@ -98,7 +98,7 @@ def cleanup(usr, host, dom, ytid):
     )
 
 
-def child(q, postprocess_q, child_id, pbar, args):
+def child(q, postprocess_q, child_id, done_q, args):
     while True:
         (ytid, start, duration, label_ids, host) = q.get()
         if ytid == "?":
@@ -121,7 +121,7 @@ def child(q, postprocess_q, child_id, pbar, args):
         except Exception as e:
             with logging_redirect_tqdm():
                 logger.error(f"Error downloading {ytid} on {host} -- {str(e)}")
-            pbar.update(1)
+            done_q.put(1)
             continue
 
         if len(output) <= 1:
@@ -138,8 +138,7 @@ def child(q, postprocess_q, child_id, pbar, args):
         else:
             with logging_redirect_tqdm():
                 logger.error(f"{output.strip()}")
-
-        pbar.update(1)
+        done_q.put(1)
 
 
 if __name__ == "__main__":
@@ -179,8 +178,18 @@ if __name__ == "__main__":
         default=False,
         help="post process by enforcing duration",
     )
+    parser.add_argument(
+        "--datatype",
+        type=str,
+        default="csv",
+        help="What kind of structure is the input file? choices are csv (default) and tsv",
+    )
 
     args = parser.parse_args()
+
+    delim = ","
+    if args.datatype == "tsv":
+        delim = "\t"
 
     video_csv = args.data
     num_proxies = args.num_workers
@@ -222,6 +231,7 @@ if __name__ == "__main__":
     q = mp.Queue()
     postprocess_q = mp.Queue()
     label_q = mp.Queue()
+    done_q = mp.Queue()
     num_postprocessors = args.num_postprocessors  # try for ~.8 of num_proxies
     workers = []
     hosts = []
@@ -239,11 +249,11 @@ if __name__ == "__main__":
         "scp downloader.py %s@%s.%s:~/AudioSet/downloader.py"
         % (user, selectHost(hosts, args), domain)
     )
-    pbar = tqdm(total=1, smoothing=0.05)
+
     with logging_redirect_tqdm():
         logger.info("Setting up workers...")
     for i in range(num_proxies):
-        workers.append(Process(target=child, args=(q, postprocess_q, i, pbar, args)))
+        workers.append(Process(target=child, args=(q, postprocess_q, i, done_q, args)))
 
     if args.postprocess:
         with logging_redirect_tqdm():
@@ -271,7 +281,8 @@ if __name__ == "__main__":
     with logging_redirect_tqdm():
         logger.info("Reading video csv...")
     with open(video_csv, newline="") as csvfile:
-        reader = csv.reader(csvfile)
+        total = 0
+        reader = csv.reader(csvfile, delimiter=delim)
         for i, row in enumerate(reader):
             # skip header if it exists
             try:
@@ -290,8 +301,12 @@ if __name__ == "__main__":
 
             if not os.path.exists("%s/%s.mkv" % (tmp, ytid)):
                 q.put((ytid, start, duration, label_ids, host))
-                pbar.total += 1
-                pbar.refresh()
+                total += 1
+
+    count = 0
+    pbar = tqdm(total=total, smoothing=0.05)
+    while count < total:
+        count += done_q.get()
 
     for i in range(num_proxies):
         q.put(("?", None, None, None, None))

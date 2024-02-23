@@ -1,15 +1,13 @@
-import sys
-import time
 import os
-import yt_dlp
+import shutil
 import subprocess
+import sys
+import tarfile
+import time
+from random import randint
+
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
-import shutil
-import time
-import tarfile
-import random
-import subprocess
 
 MAX_LEN = 180  # 3 minute maximum
 
@@ -20,14 +18,18 @@ metadata = sys.argv[4] == "True"
 home = os.path.expanduser("~")
 pwd = os.getcwd()
 
+
 class loggerOutputs:
     def error(msg):
         raise DownloadError(msg)
+
     def warning(msg):
         pass
+
     def debug(msg):
         pass
-        
+
+
 # print(start, duration)
 base_options = {
     "cachedir": False,
@@ -42,8 +44,6 @@ base_options = {
             str(start),
             "-t",
             str(duration),
-            # "-reset_timestamps",
-            # "1",
         ]
     },
     "extract_flat": "discard_in_playlist",
@@ -79,7 +79,7 @@ def detect_crop(fp):
     return dims
 
 
-def split_video(t=10):
+def split_video(t=10, n=3):
     global duration, start
     fname = os.path.join(home, f"AudioSet/{ytid}/{ytid}.mkv")
     try:
@@ -92,10 +92,14 @@ def split_video(t=10):
     if duration > MAX_LEN and start == 0:
         start = (duration - MAX_LEN) // 2
         duration = start + MAX_LEN
-
-    for i, start in enumerate(range(start, int(duration), t)):
+    segment_length = duration // n
+    for i, st in enumerate(range(start, duration, segment_length)):
+        if duration - st < segment_length:
+            break
+        s = randint(st, st + segment_length - t)
+        #    for i, start in enumerate(range(start, int(duration), t)):
         os.system(
-            f"ffmpeg -hide_banner -loglevel 0 -i {fname} -ss {start} -t {t} -vf 'fps=24,crop={dim[0]}:{dim[1]}' -reset_timestamps 1 -c:v libx264 -crf 23 -preset veryfast -ac 1 -ar 48000 ~/AudioSet/{ytid}/{ytid}.{i:03d}.mkv"
+            f"ffmpeg -hide_banner -loglevel 0 -i {fname} -ss {s} -t {t} -vf 'fps=24,crop={dim[0]}:{dim[1]}' -reset_timestamps 1 -c:v libx264 -crf 23 -preset veryfast -ac 1 -ar 48000 ~/AudioSet/{ytid}/{ytid}.{i:03d}.mkv"
         )
     os.remove(fname)
     tgz_fname = os.path.join(home, f"AudioSet/{ytid}.tgz")
