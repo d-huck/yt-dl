@@ -26,9 +26,6 @@ class loggerOutputs:
     def warning(msg):
         pass
 
-    def info(msg):
-        print(msg)
-
     def debug(msg):
         pass
 
@@ -113,7 +110,6 @@ with YoutubeDL(base_options) as ydl:
     try:
         result = ydl.extract_info(ytid, download=False)
         if result["height"] >= 720:
-            print("downloading...")
             ydl.download(ytid)
             split_video(result)
     except DownloadError as e:
