@@ -106,7 +106,7 @@ def child(q, postprocess_q, child_id, done_q, args):
             break
 
         # start = time.strftime("%H:%M:%S.00", time.gmtime(start))
-        duration = str(int(duration))
+        # duration = str(int(duration))
 
         try:
             logger.info(f"[qsize: {q.qsize()}] Downloading {ytid} on {host}")
@@ -130,7 +130,7 @@ def child(q, postprocess_q, child_id, done_q, args):
             )
             cleanup(args.user, host, args.domain, ytid)
             if args.postprocess:
-                postprocess_q.put((duration, host, ytid, label_ids))
+                postprocess_q.put((host, ytid, label_ids))
 
         else:
             logger.error(f"Error: {output.strip()}")
