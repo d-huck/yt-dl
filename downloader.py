@@ -112,5 +112,7 @@ with YoutubeDL(base_options) as ydl:
         if result["height"] >= 720:
             ydl.download(ytid)
             split_video(result)
+        else:
+            print("video too low resolution")
     except DownloadError as e:
         print(f"Unable to download {ytid} on {os.uname()[1]}: {e}")
