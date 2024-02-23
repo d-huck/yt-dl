@@ -12,9 +12,9 @@ from yt_dlp.utils import DownloadError
 MAX_LEN = 180  # 3 minute maximum
 
 ytid = sys.argv[1]
-start = int(sys.argv[2])
-duration = int(sys.argv[3])
-metadata = sys.argv[4] == "True"
+# start = int(sys.argv[2])
+# duration = int(sys.argv[3])
+metadata = sys.argv[2] == "True"
 home = os.path.expanduser("~")
 pwd = os.getcwd()
 
@@ -25,6 +25,9 @@ class loggerOutputs:
 
     def warning(msg):
         pass
+
+    def info(msg):
+        print(msg)
 
     def debug(msg):
         pass
@@ -40,10 +43,6 @@ base_options = {
             "-loglevel",
             "panic",
             "-hide_banner",
-            "-ss",
-            str(start),
-            "-t",
-            str(duration),
         ]
     },
     "extract_flat": "discard_in_playlist",
@@ -60,7 +59,7 @@ base_options = {
         {"key": "FFmpegConcat", "only_multi_video": True, "when": "playlist"}
     ],
     "quiet": True,
-    "logger": loggerOutputs,
+    # "logger": loggerOutputs,
     "retries": 5,
     "socket_timeout": 60.0,
     "throttledratelimit": 5_120_000,
@@ -79,8 +78,9 @@ def detect_crop(fp):
     return dims
 
 
-def split_video(t=10, n=3):
-    global duration, start
+def split_video(result, t=10, n=4):
+    start = 0
+    duration = int(result["duration"])
     fname = os.path.join(home, f"AudioSet/{ytid}/{ytid}.mkv")
     try:
         dim = detect_crop(fname)
@@ -94,7 +94,7 @@ def split_video(t=10, n=3):
         duration = start + MAX_LEN
     segment_length = duration // n
     for i, st in enumerate(range(start, duration, segment_length)):
-        if duration - st < segment_length:
+        if i == n:
             break
         s = randint(st, st + segment_length - t)
         #    for i, start in enumerate(range(start, int(duration), t)):
@@ -111,7 +111,10 @@ def split_video(t=10, n=3):
 
 with YoutubeDL(base_options) as ydl:
     try:
-        error = ydl.download(ytid)
-        split_video()
+        result = ydl.extract_info(ytid, download=False)
+        if result["height"] >= 720:
+            print("downloading...")
+            ydl.download(ytid)
+            split_video(result)
     except DownloadError as e:
         print(f"Unable to download {ytid} on {os.uname()[1]}: {e}")
