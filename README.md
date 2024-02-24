@@ -8,7 +8,7 @@ The script accepts simple inputs from a dataset, such as [YouTube-8M](https://re
 
 - Python 3.8+
 - yt-dlp (https://github.com/yt-dlp/yt-dlp)
-- ffmpeg
+- ffmpeg installed on each remote and local host
 
 In addition, you should have passowordless ssh privileges to servers.
 
